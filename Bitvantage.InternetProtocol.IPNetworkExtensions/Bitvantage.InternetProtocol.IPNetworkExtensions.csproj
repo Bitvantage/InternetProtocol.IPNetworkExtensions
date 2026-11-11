@@ -1,0 +1,59 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+		<!-- the library is written as C# 14 extension members, which the .NET 8 target only gets when asked for -->
+		<LangVersion>14</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<RootNamespace>Bitvantage.InternetProtocol</RootNamespace>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<Version>1.0.0</Version>
+		<Authors>Michael Crino</Authors>
+		<Company>Bitvantage</Company>
+		<Copyright>Copyright (c) 2024-2026 Michael Crino</Copyright>
+		<Title>IPNetwork Extensions: CIDR and subnet math for System.Net.IPNetwork</Title>
+		<Description>C# 14 extension members for System.Net.IPNetwork and IPAddress that add CIDR, subnet and supernet math: network and wildcard masks, host ranges, subnet and supernet tests, splitting, summarization, intersection, exclusion, conversion between address ranges and CIDR blocks, free subnet search, sorting, address arithmetic, IANA address classification, strict parsing, reverse DNS names, JSON serialization and configuration binding.</Description>
+		<PackageTags>ipnetwork;ipaddress;ip-address;cidr;subnet;supernet;netmask;subnet-mask;wildcard-mask;ip-range;networkprefix;reverse-dns;ipv4;ipv6;networking;extension-members;aot</PackageTags>
+		<PackageProjectUrl>https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageReleaseNotes>https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions/releases/tag/v$(Version)</PackageReleaseNotes>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<!-- a library has no excuse for warnings, and this keeps every public member documented -->
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+		<!-- turns on the trimming and native AOT analyzers, and tells consumers the library is safe to trim and compile ahead of time -->
+		<IsAotCompatible>true</IsAotCompatible>
+
+		<!-- Source Link, which the SDK includes, lets a debugger fetch the exact source of a build from the repository -->
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+		<EnablePackageValidation>true</EnablePackageValidation>
+		<!-- Bitvantage.InternetProtocol.IPNetworkExtensions is not on nuget.org yet, so there is no published version to compare
+		     with. Once 1.0.0 is published, uncomment this so that a breaking change in a later 1.x release fails the pack -->
+		<!-- <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion> -->
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(CI)' == 'true'">
+		<!-- normalizes the paths embedded in a CI build, so the same commit always produces the same package -->
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="../README.md" Pack="true" PackagePath="" />
+		<None Include="../icon.png" Pack="true" PackagePath="" />
+	</ItemGroup>
+
+</Project>

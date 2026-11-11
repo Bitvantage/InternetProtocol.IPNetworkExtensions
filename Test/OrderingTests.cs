@@ -1,0 +1,176 @@
+/*
+   Bitvantage.InternetProtocol.IPNetworkExtensions
+   Copyright (c) 2024-2026 Michael Crino
+   
+   Licensed under the MIT License. See LICENSE.md in the repository root for the full license text.
+*/
+
+using System.Net;
+using Bitvantage.InternetProtocol;
+using static Test.TestNetworks;
+
+namespace Test;
+
+public class OrderingTests
+{
+    [Test]
+    public void Addition_IPv4_01()
+    {
+        Assert.That(Network("10.20.30.0/24") + 5, Is.EqualTo(Network("10.20.35.0/24")));
+        Assert.That(Network("255.255.255.0/28") + 12, Is.EqualTo(Network("255.255.255.192/28")));
+        Assert.That(Network("10.20.30.0/24") + 0, Is.EqualTo(Network("10.20.30.0/24")));
+    }
+
+    [Test]
+    public void Addition_IPv4_02()
+    {
+        // moving past the end of the address space throws
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("255.255.255.0/28") + 16);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("255.255.255.0/28") + UInt128.MaxValue);
+    }
+
+    [Test]
+    public void Addition_IPv6_01()
+    {
+        // ::/0 spans every IPv6 address, so it can only be moved by zero networks
+        var everyAddress = Network("::/0");
+
+        Assert.That(everyAddress + 0, Is.EqualTo(everyAddress));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = everyAddress + 1);
+
+        // moving past the last /64 runs off the end of the address space
+        Assert.That(Network("ffff:ffff:ffff:fffe::/64") + 1, Is.EqualTo(Network("ffff:ffff:ffff:ffff::/64")));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("ffff:ffff:ffff:ffff::/64") + 1);
+    }
+
+    [Test]
+    public void CompareTo_IPv4_01()
+    {
+        var lowerNetwork = Network("10.0.0.0/16");
+        var higherNetwork = Network("10.1.0.0/16");
+
+        Assert.That(lowerNetwork.CompareTo(higherNetwork), Is.Negative);
+        Assert.That(higherNetwork.CompareTo(lowerNetwork), Is.Positive);
+        Assert.That(lowerNetwork.CompareTo(Network("10.0.0.0/16")), Is.Zero);
+    }
+
+    [Test]
+    public void CompareTo_IPv4_02()
+    {
+        // with the same base address, the bigger network sorts first
+        Assert.That(Network("10.1.0.0/16").CompareTo(Network("10.1.0.0/17")), Is.Negative);
+    }
+
+    [Test]
+    public void CompareTo_IPv4_03()
+    {
+        // IPv4 sorts before IPv6
+        Assert.That(Network("255.0.0.0/8").CompareTo(Network("::/0")), Is.Negative);
+    }
+
+    [Test]
+    public void Comparer_IPv4_01()
+    {
+        // IPNetwork does not implement IComparable, so sorting needs the comparer
+        var networks = Networks(
+                "10.0.128.0/17",
+                "2001:db8::/32",
+                "10.0.64.0/18",
+                "10.0.32.0/19",
+                "10.0.16.0/20",
+                "10.0.0.0/21",
+                "10.0.12.0/22",
+                "10.0.8.0/23",
+                "10.0.11.0/24")
+            .Order(IPNetwork.Comparer)
+            .ToArray();
+
+        var expectedResult = Networks(
+            "10.0.0.0/21",
+            "10.0.8.0/23",
+            "10.0.11.0/24",
+            "10.0.12.0/22",
+            "10.0.16.0/20",
+            "10.0.32.0/19",
+            "10.0.64.0/18",
+            "10.0.128.0/17",
+            "2001:db8::/32");
+
+        Assert.That(networks, Is.EqualTo(expectedResult));
+    }
+
+    [Test]
+    public void Comparer_IPv4_02()
+    {
+        // without the comparer, sorting IPNetwork fails at runtime
+        var networks = Networks("10.0.1.0/24", "10.0.0.0/24");
+
+        Assert.Throws<InvalidOperationException>(() => networks.Order().ToArray());
+
+        var sortedNetworks = new SortedSet<IPNetwork>(networks, IPNetwork.Comparer);
+        Assert.That(sortedNetworks.Min, Is.EqualTo(Network("10.0.0.0/24")));
+    }
+
+    [Test]
+    public void ComparisonOperators_IPv4_01()
+    {
+        var lowerNetwork = Network("10.0.0.0/16");
+        var higherNetwork = Network("10.1.0.0/16");
+        var lowerNetworkCopy = Network("10.0.0.0/16");
+
+        Assert.That(lowerNetwork < higherNetwork, Is.True);
+        Assert.That(lowerNetwork <= lowerNetworkCopy, Is.True);
+        Assert.That(higherNetwork > lowerNetwork, Is.True);
+        Assert.That(higherNetwork >= lowerNetwork, Is.True);
+        Assert.That(lowerNetwork >= lowerNetworkCopy, Is.True);
+        Assert.That(higherNetwork < lowerNetwork, Is.False);
+    }
+
+    [Test]
+    public void Subtraction_IPv4_01()
+    {
+        Assert.That(Network("10.20.30.0/24") - 15, Is.EqualTo(Network("10.20.15.0/24")));
+        Assert.That(Network("128.0.0.0/1") - 1, Is.EqualTo(Network("0.0.0.0/1")));
+    }
+
+    [Test]
+    public void Subtraction_IPv4_02()
+    {
+        // moving before the start of the address space throws
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("0.0.0.0/24") - 1);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("0.0.0.0/24") - UInt128.MaxValue);
+    }
+
+    [Test]
+    public void CompareTo_IPv6_Scope_01()
+    {
+        // equality includes the scope ID, so networks that differ only in it sort apart and a sorted set keeps both
+        var interface2Network = new IPNetwork(Address("fe80::%2"), 64);
+        var interface3Network = new IPNetwork(Address("fe80::%3"), 64);
+
+        Assert.That(interface2Network.Equals(interface3Network), Is.False);
+        Assert.That(interface2Network.CompareTo(interface3Network), Is.Negative);
+        Assert.That(interface3Network.CompareTo(interface2Network), Is.Positive);
+        Assert.That(interface2Network.CompareTo(new IPNetwork(Address("fe80::%2"), 64)), Is.Zero);
+        Assert.That(new SortedSet<IPNetwork>([interface2Network, interface3Network], IPNetwork.Comparer), Has.Count.EqualTo(2));
+
+        // the scope ID only breaks ties, so the address and prefix length still come first
+        Assert.That(new IPNetwork(Address("fe80::%9"), 64).CompareTo(new IPNetwork(Address("fe80:0:0:1::%1"), 64)), Is.Negative);
+    }
+
+    [Test]
+    public void Addition_Int_01()
+    {
+        // an int variable compiles, and a negative count moves the other way
+        var count = 2;
+        var negativeCount = -2;
+
+        Assert.That(Network("10.0.0.0/24") + count, Is.EqualTo(Network("10.0.2.0/24")));
+        Assert.That(Network("10.0.2.0/24") + negativeCount, Is.EqualTo(Network("10.0.0.0/24")));
+        Assert.That(Network("10.0.2.0/24") - count, Is.EqualTo(Network("10.0.0.0/24")));
+        Assert.That(Network("10.0.0.0/24") - negativeCount, Is.EqualTo(Network("10.0.2.0/24")));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("0.0.0.0/24") + int.MinValue);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = Network("255.255.255.0/24") - -1);
+    }
+}

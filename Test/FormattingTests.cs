@@ -1,0 +1,113 @@
+/*
+   Bitvantage.InternetProtocol.IPNetworkExtensions
+   Copyright (c) 2024-2026 Michael Crino
+   
+   Licensed under the MIT License. See LICENSE.md in the repository root for the full license text.
+*/
+
+using System.Net;
+using Bitvantage.InternetProtocol;
+using static Test.TestNetworks;
+
+namespace Test;
+
+public class FormattingTests
+{
+    [Test]
+    public void ToString_IPv4_01()
+    {
+        var network = Network("10.20.30.0/24");
+
+        Assert.That(network.ToString(), Is.EqualTo("10.20.30.0/24"));
+        Assert.That(network.ToString(NetworkFormat.AddressAndPrefix), Is.EqualTo("10.20.30.0/24"));
+        Assert.That(network.ToString(NetworkFormat.AddressAndMask), Is.EqualTo("10.20.30.0 255.255.255.0"));
+        Assert.That(network.ToString(NetworkFormat.AddressAndHostMask), Is.EqualTo("10.20.30.0 0.0.0.255"));
+        Assert.That(network.ToString(NetworkFormat.Address), Is.EqualTo("10.20.30.0"));
+        Assert.That(network.ToString(NetworkFormat.Mask), Is.EqualTo("255.255.255.0"));
+        Assert.That(network.ToString(NetworkFormat.HostMask), Is.EqualTo("0.0.0.255"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => network.ToString((NetworkFormat)99));
+    }
+
+    [Test]
+    public void GetReverseZone_IPv4_01()
+    {
+        Assert.That(Network("10.0.0.0/24").GetReverseZone(), Is.EqualTo("0.0.10.in-addr.arpa"));
+        Assert.That(Network("10.0.0.0/8").GetReverseZone(), Is.EqualTo("10.in-addr.arpa"));
+        Assert.That(Network("0.0.0.0/0").GetReverseZone(), Is.EqualTo("in-addr.arpa"));
+        Assert.That(Network("10.1.2.3/32").GetReverseZone(), Is.EqualTo("3.2.1.10.in-addr.arpa"));
+
+        // a network that does not end on a byte has no zone of its own
+        Assert.Throws<InvalidOperationException>(() => Network("10.0.0.0/23").GetReverseZone());
+    }
+
+    [Test]
+    public void GetReverseZone_IPv6_01()
+    {
+        Assert.That(Network("2001:db8::/32").GetReverseZone(), Is.EqualTo("8.b.d.0.1.0.0.2.ip6.arpa"));
+        Assert.That(Network("2001:db8:a::/52").GetReverseZone(), Is.EqualTo("0.a.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"));
+        Assert.That(Network("::/0").GetReverseZone(), Is.EqualTo("ip6.arpa"));
+
+        // a network that does not end on a hexadecimal digit has no zone of its own
+        Assert.Throws<InvalidOperationException>(() => Network("2001:db8::/30").GetReverseZone());
+    }
+
+    [Test]
+    public void ToString_IPv4_02()
+    {
+        var actual = Network("10.20.30.0/24").ToString(NetworkFormat.Detail);
+        var expected =
+            """
+            Address:    10.20.30.0     00001010.00010100.00011110.00000000
+            Mask:       255.255.255.0  11111111.11111111.11111111.00000000
+            Wildcard:   0.0.0.255      00000000.00000000.00000000.11111111
+            Broadcast:  10.20.30.255   00001010.00010100.00011110.11111111
+            First Host: 10.20.30.1     00001010.00010100.00011110.00000001
+            Last Host:  10.20.30.254   00001010.00010100.00011110.11111110
+            Hosts/Net:  254
+
+            """;
+
+        Assert.That(actual, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void ToString_IPv4_03()
+    {
+        // the host count of a host network is written as a plain number
+        var hostCountLine = Network("10.20.30.40/32")
+            .ToString(NetworkFormat.Detail)
+            .Split(Environment.NewLine)
+            .Single(line => line.StartsWith("Hosts/Net:"));
+
+        Assert.That(hostCountLine, Is.EqualTo("Hosts/Net:  1"));
+    }
+
+    [Test]
+    public void ToString_IPv6_01()
+    {
+        // IPv6 has no broadcast address, so the detail has no broadcast row and the last address is the last host
+        var actual = Network("2001:0db8:0001:0000:0000:0ab9:C0A8:0102/45").ToString(NetworkFormat.Detail);
+        var expected =
+            """
+            Address:    2001:db8::                           0010000000000001:0000110110111000:0000000000000000:0000000000000000:0000000000000000:0000000000000000:0000000000000000:0000000000000000
+            Mask:       ffff:ffff:fff8::                     1111111111111111:1111111111111111:1111111111111000:0000000000000000:0000000000000000:0000000000000000:0000000000000000:0000000000000000
+            Wildcard:   ::7:ffff:ffff:ffff:ffff:ffff         0000000000000000:0000000000000000:0000000000000111:1111111111111111:1111111111111111:1111111111111111:1111111111111111:1111111111111111
+            First Host: 2001:db8::1                          0010000000000001:0000110110111000:0000000000000000:0000000000000000:0000000000000000:0000000000000000:0000000000000000:0000000000000001
+            Last Host:  2001:db8:7:ffff:ffff:ffff:ffff:ffff  0010000000000001:0000110110111000:0000000000000111:1111111111111111:1111111111111111:1111111111111111:1111111111111111:1111111111111111
+            Hosts/Net:  9,671,406,556,917,033,397,649,407
+            
+            """;
+
+        Assert.That(actual, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void GetReverseZones_01()
+    {
+        Assert.That(Network("10.0.0.0/22").GetReverseZones(), Is.EqualTo(new[] { "0.0.10.in-addr.arpa", "1.0.10.in-addr.arpa", "2.0.10.in-addr.arpa", "3.0.10.in-addr.arpa" }));
+        Assert.That(Network("10.0.0.0/24").GetReverseZones(), Is.EqualTo(new[] { Network("10.0.0.0/24").GetReverseZone() }));
+        Assert.That(Network("2001:db8::/31").GetReverseZones(), Is.EqualTo(new[] { "8.b.d.0.1.0.0.2.ip6.arpa", "9.b.d.0.1.0.0.2.ip6.arpa" }));
+        Assert.That(Network("10.0.0.0/9").GetReverseZones(), Has.Count.EqualTo(128));
+        Assert.That(Network("10.0.0.5").GetReverseZones(), Is.EqualTo(new[] { "5.0.0.10.in-addr.arpa" }));
+    }
+}
