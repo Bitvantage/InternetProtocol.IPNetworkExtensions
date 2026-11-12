@@ -11,7 +11,7 @@
 	</PropertyGroup>
 
 	<PropertyGroup>
-		<Version>1.0.0</Version>
+		<Version>1.1.0</Version>
 		<Authors>Michael Crino</Authors>
 		<Company>Bitvantage</Company>
 		<Copyright>Copyright (c) 2024-2026 Michael Crino</Copyright>
@@ -41,9 +41,8 @@
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
 		<EnablePackageValidation>true</EnablePackageValidation>
-		<!-- Bitvantage.InternetProtocol.IPNetworkExtensions is not on nuget.org yet, so there is no published version to compare
-		     with. Once 1.0.0 is published, uncomment this so that a breaking change in a later 1.x release fails the pack -->
-		<!-- <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion> -->
+		<!-- compares the package with 1.0.0 on nuget.org, so that a breaking change in a later 1.x release fails the pack -->
+		<PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(CI)' == 'true'">
