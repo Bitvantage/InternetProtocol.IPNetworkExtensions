@@ -42,9 +42,9 @@ var totalHosts = network.TotalHosts;             // 254
 foreach (var address in network.Hosts())
     Console.WriteLine(address);
 
-var containsAddress = network.Contains(IPAddress.Parse("10.0.0.100"));    // true, built into IPNetwork
-var isSupernet = network.IsSupernetOf(IPNetwork.Parse("10.0.0.0/25"));    // true
-var overlaps = network.Overlaps(IPNetwork.Parse("10.0.0.128/25"));        // true
+var containsAddress = network.ContainsStrict(IPAddress.Parse("10.0.0.100")); // true
+var isSupernet = network.IsSupernetOf(IPNetwork.Parse("10.0.0.0/25"));       // true
+var overlaps = network.Overlaps(IPNetwork.Parse("10.0.0.128/25"));           // true
 ```
 
 The subnet and supernet tests follow the names of .NET's set methods, such as `HashSet<T>.IsSubsetOf`. A network is a
@@ -57,6 +57,9 @@ subnet and a supernet of itself, but not a proper one.
 | `IsSubnetOf`         | this network is inside the other, or equal       |
 | `IsProperSubnetOf`   | this network is inside the other, not equal      |
 | `Overlaps`           | the two networks share any address               |
+| `ContainsStrict`     | the address is in this network, same IP version  |
+
+`ContainsStrict` tests an address where the built-in `Contains` would. It gives the same answer on every version of .NET, which the built-in does not; see [Addresses](#addresses).
 
 ## Parsing
 `IPNetwork.Parse` accepts every IPv4 form that `IPAddress.Parse` does, and reads a number with a leading zero as octal,
@@ -144,6 +147,21 @@ var gateway = network.GetAddress(1);                                      // 10.
 var offset = network.GetOffset(IPAddress.Parse("10.0.0.100"));           // 100
 ```
 
+To size a plan, `GetPrefixLengthForAddresses` counts every address, while `GetPrefixLengthForHosts` leaves out the ones a host can't use, which differ between IPv4 and IPv6. `GetPrefixLengthForSubnets` sizes a block for a number of equal subnets, or for one subnet of each of several sizes. `AllocateSubnets` then lays out a variable-length subnet masking (VLSM) plan, returning the subnets in the order requested.
+
+```csharp
+IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 256);                 // 24, where GetPrefixLengthForHosts gives 23
+IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, 64, 300);               // 55, which holds 512 /64s
+IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [23, 24, 26]);          // 22
+
+var block = IPNetwork.ParseStrict("10.0.0.0/22");
+var vlans = block.AllocateSubnets([26, 24, 23]);                            // 10.0.0.0/26, 10.0.1.0/24, 10.0.2.0/23
+var added = block.AllocateSubnets([25], vlans);                             // 10.0.0.128/25
+var fits = block.TryAllocateSubnets([23, 23, 23], out _);                   // false
+```
+
+Each subnet goes in the smallest free block that holds it, so the subnets fit whenever any arrangement of them fits, and a subnet never moves once it is placed. Taking `AvailableSubnets(...).First()` for each subnet in turn can fail where `AllocateSubnets` succeeds, because a small subnet can take the start of the only free block that a later, larger one needed. The subnets always fit in an empty block of the size `GetPrefixLengthForSubnets` gives.
+
 `GetAddress` and the `+` and `-` operators take an `int` as well as a `UInt128`, so a loop counter works directly, as in
 `network.GetAddress(index)`. Cast other integer types to one of the two.
 
@@ -191,16 +209,17 @@ var isMask = IPAddress.Parse("255.255.255.0").TryGetPrefixLength(out var prefixL
 var expanded = IPAddress.Parse("2001:db8::1").ToExpandedString(); // 2001:0db8:0000:0000:0000:0000:0000:0001
 ```
 
-A dual-stack server reports IPv4 clients as IPv4-mapped IPv6 addresses, such as `::ffff:10.1.2.3`. Classification treats
-them as the IPv4 address they carry. The subnet and supernet tests keep IPv4 and IPv6 apart, as Go's `net/netip` does,
-while the built-in `Contains` maps them from .NET 9 on. `Unmap` converts such an address to IPv4.
+A dual-stack server reports IPv4 clients as IPv4-mapped IPv6 addresses, such as `::ffff:10.1.2.3`, and so does IPv6 storage that also holds IPv4 addresses. Classification treats them as the IPv4 address they carry. `ContainsStrict` and the subnet and supernet tests keep IPv4 and IPv6 apart, as Go's `net/netip` does, and `Unmap` converts an address, or a network such as `::ffff:10.0.0.0/104`, to IPv4.
+
+The built-in `Contains` keeps them apart on .NET 8 and maps them to IPv4 from .NET 9 on. On .NET 9 and .NET 10 it also tests a mapped address against an IPv6 network as though both were IPv4, so the public client `::ffff:1.2.3.4` matches `fc00::/7`, one of the private networks. .NET 11 fixes that. `ContainsStrict` gives the same answer on every version.
 
 ```csharp
 var client = IPAddress.Parse("::ffff:10.1.2.3");
 client.Allocation;                                                      // Private
-IPNetwork.Parse("10.0.0.0/8").Contains(client);                         // true, built into IPNetwork
-IPNetwork.Parse("10.0.0.0/8").IsSupernetOf(IPNetwork.FromAddress(client));         // false
-IPNetwork.Parse("10.0.0.0/8").IsSupernetOf(IPNetwork.FromAddress(client.Unmap())); // true
+IPNetwork.Parse("10.0.0.0/8").ContainsStrict(client);                   // false
+IPNetwork.Parse("10.0.0.0/8").ContainsStrict(client.Unmap());           // true
+IPNetwork.Parse("10.0.0.0/8").Contains(client);                         // true from .NET 9 on, built into IPNetwork
+IPNetwork.Parse("::ffff:10.0.0.0/104").Unmap();                         // 10.0.0.0/8
 ```
 
 ## Formatting
@@ -224,15 +243,7 @@ Hosts/Net:  254
 ```
 
 ## Performance
-The members convert a network to integers on each call, which takes a few nanoseconds and allocates nothing. Subnet,
-supernet and overlap tests take 3 to 5 nanoseconds, two to three times the built-in `Contains` for an address. Members
-that return an `IPAddress`, such as `NetworkMask`, create a new address on every call. In a hot loop, use the integer
-members instead: `BaseAddressBits`, `NetworkMaskBits` and `HostMaskBits` on the network, and `AddressBits` on the
-address being tested. Set operations such as `Exclude` and `Summarize` run in time proportional to the number of
-networks; removing 100,000 host addresses from a /8, which leaves about 650,000 networks, takes between 60 and 300
-milliseconds. Methods whose results can be astronomically
-long, such as `Addresses`, `Hosts`, `Split` and `AvailableSubnets`, produce them only as they are enumerated, so taking
-the first few is cheap.
+The members convert a network to integers on each call, which takes a few nanoseconds and allocates nothing. `ContainsStrict` and the subnet, supernet and overlap tests take 3 to 5 nanoseconds, two to three times the built-in `Contains` for an address. Members that return an `IPAddress`, such as `NetworkMask`, create a new address on every call. In a hot loop, use the integer members instead: `BaseAddressBits`, `NetworkMaskBits` and `HostMaskBits` on the network, and `AddressBits` on the address being tested. Set operations such as `Exclude` and `Summarize` run in time proportional to the number of networks; removing 100,000 host addresses from a /8, which leaves about 650,000 networks, takes between 60 and 300 milliseconds. Methods whose results can be astronomically long, such as `Addresses`, `Hosts`, `Split` and `AvailableSubnets`, produce them only as they are enumerated, so taking the first few is cheap.
 
 The `Benchmarks` project in the repository measures these with BenchmarkDotNet. Run all of them, or pick some with a
 filter:

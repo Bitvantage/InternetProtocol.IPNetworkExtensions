@@ -16,8 +16,8 @@
 		<Company>Bitvantage</Company>
 		<Copyright>Copyright (c) 2024-2026 Michael Crino</Copyright>
 		<Title>IPNetwork Extensions: CIDR and subnet math for System.Net.IPNetwork</Title>
-		<Description>C# 14 extension members for System.Net.IPNetwork and IPAddress that add CIDR, subnet and supernet math: network and wildcard masks, host ranges, subnet and supernet tests, splitting, summarization, intersection, exclusion, conversion between address ranges and CIDR blocks, free subnet search, sorting, address arithmetic, IANA address classification, strict parsing, reverse DNS names, JSON serialization and configuration binding.</Description>
-		<PackageTags>ipnetwork;ipaddress;ip-address;cidr;subnet;supernet;netmask;subnet-mask;wildcard-mask;ip-range;networkprefix;reverse-dns;ipv4;ipv6;networking;extension-members;aot</PackageTags>
+		<Description>C# 14 extension members for System.Net.IPNetwork and IPAddress that add CIDR, subnet and supernet math: network and wildcard masks, host ranges, subnet and supernet tests, splitting, summarization, intersection, exclusion, conversion between address ranges and CIDR blocks, subnet sizing, VLSM subnet allocation, free subnet search, sorting, address arithmetic, IANA address classification, strict parsing, reverse DNS names, JSON serialization and configuration binding.</Description>
+		<PackageTags>ipnetwork;ipaddress;ip-address;cidr;subnet;supernet;vlsm;netmask;subnet-mask;wildcard-mask;ip-range;networkprefix;reverse-dns;ipv4;ipv6;networking;extension-members;aot</PackageTags>
 		<PackageProjectUrl>https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>

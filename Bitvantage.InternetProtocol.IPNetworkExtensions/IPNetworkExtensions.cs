@@ -36,10 +36,12 @@ namespace Bitvantage.InternetProtocol;
 ///         interface rather than part of an address.
 ///     </para>
 ///     <para>
-///         The subnet, supernet and overlap tests treat IPv4 and IPv6 as separate address spaces, as Go's <c>net/netip</c> does,
-///         so an IPv4-mapped IPv6 address such as <c>::ffff:10.1.2.3</c> is not inside <c>10.0.0.0/8</c>. From .NET 9 on, the
-///         built-in <see cref="IPNetwork.Contains(IPAddress)" /> does map such an address to IPv4, and on .NET 8 it doesn't. Use the
-///         <c>Unmap</c> extension method of <see cref="IPAddress" /> to compare a mapped address as IPv4.
+///         The subnet, supernet and overlap tests, and <c>ContainsStrict</c> for an address, treat IPv4 and IPv6 as separate
+///         address spaces, as Go's <c>net/netip</c> does, so an IPv4-mapped IPv6 address such as <c>::ffff:10.1.2.3</c> is not
+///         inside <c>10.0.0.0/8</c>. The built-in <see cref="IPNetwork.Contains(IPAddress)" /> keeps them apart on .NET 8, maps
+///         such an address to IPv4 from .NET 9 on, and on .NET 9 and .NET 10 also tests one wrongly against an IPv6
+///         network; prefer <c>ContainsStrict</c>, which gives the same answer everywhere. Use the <c>Unmap</c> extension method
+///         of <see cref="IPAddress" /> to compare a mapped address as IPv4.
 ///     </para>
 ///     <para>
 ///         Each member converts its networks to integers on every call. The conversion takes a few nanoseconds and allocates
@@ -201,6 +203,44 @@ public static partial class IPNetworkExtensions
         public IPVersion Version => NetworkBits.FromIPNetwork(network).Version;
 
         /// <summary>
+        ///     Determines whether an address is in this network and of the same IP version. Unlike the built-in
+        ///     <see cref="IPNetwork.Contains(IPAddress)" />, it gives the same answer on every version of .NET.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         IPv4 and IPv6 are separate address spaces here, as they are for <c>IsSupernetOf</c> and Go's <c>net/netip</c>. An
+        ///         IPv4-mapped IPv6 address such as <c>::ffff:10.1.2.3</c> is not in <c>10.0.0.0/8</c>, and <c>10.1.2.3</c> is not in
+        ///         <c>::ffff:0:0/96</c>. To test a mapped address as IPv4, convert it with <c>Unmap</c>, as in
+        ///         <c>network.ContainsStrict(address.Unmap())</c>. An IPv6 scope ID is ignored.
+        ///     </para>
+        ///     <para>
+        ///         The built-in <see cref="IPNetwork.Contains(IPAddress)" /> keeps the two apart on .NET 8. From .NET 9 on, it maps
+        ///         an IPv4-mapped address to IPv4 to test it against an IPv4 network. On .NET 9 and .NET 10 it also tests a mapped
+        ///         address against an IPv6 network as though both were IPv4, so <c>::ffff:0:0/96</c> does not contain
+        ///         <c>::ffff:10.1.2.3</c>, and <c>2001:db8::a01:200/120</c> does. .NET 11 fixes that.
+        ///     </para>
+        /// </remarks>
+        /// <param name="address">The address.</param>
+        /// <returns><see langword="true" /> when the address is in this network and of the same IP version.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="address" /> is <see langword="null" />.</exception>
+        public bool ContainsStrict(IPAddress address)
+        {
+            ArgumentNullException.ThrowIfNull(address);
+
+            // an address of the other IP version is never in the network, and that includes an IPv4-mapped address
+            var networkAddress = network.BaseAddress;
+            if (address.AddressFamily != networkAddress.AddressFamily)
+                return false;
+
+            // the address is in the network when, cut down to the network's prefix length, it is the network's address.
+            // an IPNetwork's base address never has host bits set, so the network's address needs no masking
+            var version = AddressMath.GetVersion(networkAddress.AddressFamily);
+            var networkMaskBits = AddressMath.GetNetworkMaskBits(version, network.PrefixLength);
+
+            return (AddressMath.FromIPAddress(address) & networkMaskBits) == AddressMath.FromIPAddress(networkAddress);
+        }
+
+        /// <summary>
         ///     Determines whether this network is a proper subnet of another network: a smaller network inside the other, and not
         ///     equal to it.
         /// </summary>
@@ -252,8 +292,9 @@ public static partial class IPNetworkExtensions
         /// <remarks>
         ///     The names follow <see cref="ISet{T}.IsSupersetOf" />. A network of the other IP version is never a subnet, and that
         ///     includes an IPv4-mapped IPv6 network such as <c>::ffff:10.0.0.0/104</c>, which is not a subnet of <c>10.0.0.0/8</c>.
-        ///     The built-in <see cref="IPNetwork.Contains(IPAddress)" /> differs here from .NET 9 on: it does treat <c>::ffff:10.1.2.3</c>
-        ///     as a member of <c>10.0.0.0/8</c>. Convert an address with <c>Unmap</c> to compare it as IPv4.
+        ///     To test an address, use <c>ContainsStrict</c>, which follows the same rule; the built-in
+        ///     <see cref="IPNetwork.Contains(IPAddress)" /> does not from .NET 9 on. Convert an address or a network with its
+        ///     <c>Unmap</c> method to compare it as IPv4.
         /// </remarks>
         /// <param name="other">The network that might be inside this one.</param>
         /// <returns><see langword="true" /> when every address of <paramref name="other" /> is in this network.</returns>
@@ -276,6 +317,22 @@ public static partial class IPNetworkExtensions
             // two networks can't partly overlap; either they are disjoint, or one of them lies entirely within the other. Only
             // the network with the longer prefix can lie within the other, so only one of these tests converts any addresses
             return IsWithin(network, other) || IsWithin(other, network);
+        }
+
+        /// <summary>
+        ///     Converts an IPv4-mapped IPv6 network, inside <c>::ffff:0:0/96</c>, to the IPv4 network that it maps, and returns any
+        ///     other network unchanged. For example, <c>::ffff:10.0.0.0/104</c> becomes <c>10.0.0.0/8</c>.
+        /// </summary>
+        /// <remarks>
+        ///     This is the network form of the <c>Unmap</c> method of <see cref="IPAddress" />, for networks kept as IPv6, such as
+        ///     in a database column that holds both IPv4 and IPv6. The 96 bits of the mapped prefix come off the prefix length, so
+        ///     <c>::ffff:0:0/96</c> itself becomes <c>0.0.0.0/0</c>. A network shorter than /96, such as <c>::/64</c>, holds more
+        ///     than mapped addresses and is returned unchanged.
+        /// </remarks>
+        /// <returns>The IPv4 network, or this network.</returns>
+        public IPNetwork Unmap()
+        {
+            return UnmapIPv4(NetworkBits.FromIPNetwork(network)).ToIPNetwork();
         }
     }
 
@@ -312,7 +369,7 @@ public static partial class IPNetworkExtensions
             return false;
 
         // the inner network is inside the outer one when its address, cut down to the outer network's prefix length, is the outer
-        // network's address. IPNetwork always clears the host bits of its base address, so the outer address needs no masking
+        // network's address. An IPNetwork's base address never has host bits set, so the outer address needs no masking
         var version = AddressMath.GetVersion(outerAddress.AddressFamily);
         var outerNetworkMaskBits = AddressMath.GetNetworkMaskBits(version, outerNetwork.PrefixLength);
 

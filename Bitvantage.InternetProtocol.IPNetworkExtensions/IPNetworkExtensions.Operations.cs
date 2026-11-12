@@ -4,6 +4,7 @@
    
    Licensed under the MIT License. See LICENSE.md in the repository root for the full license text.
 */
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 
 namespace Bitvantage.InternetProtocol;
@@ -28,6 +29,74 @@ public static partial class IPNetworkExtensions
         }
 
         /// <summary>
+        ///     Places one subnet of each requested prefix length inside this network, as a variable-length subnet masking (VLSM)
+        ///     plan lays them out. For example, a /26, a /24 and a /23 in <c>10.0.0.0/22</c> are <c>10.0.0.0/26</c>,
+        ///     <c>10.0.1.0/24</c> and <c>10.0.2.0/23</c>.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The subnets are returned in the order they were requested, so the third subnet is the one for the third prefix
+        ///         length, and they never overlap. <c>IPNetwork.GetPrefixLengthForSubnets</c> gives the size of network that the
+        ///         subnets need; they always fit in an empty network of that size.
+        ///     </para>
+        ///     <para>
+        ///         Each subnet, in the order requested, goes at the start of the smallest free block that holds it, and of the lowest
+        ///         such block when several are the same size. That fits the subnets whenever any arrangement of them fits, and keeps
+        ///         the larger free blocks whole. A subnet is never moved once it is placed, so adding a prefix length to the end of
+        ///         the list leaves the subnets before it where they were.
+        ///     </para>
+        /// </remarks>
+        /// <param name="prefixLengths">
+        ///     The prefix length of each subnet, from this network's prefix length to 32 for IPv4 or 128 for IPv6.
+        /// </param>
+        /// <returns>The subnets, in the order of <paramref name="prefixLengths" />.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="prefixLengths" /> is <see langword="null" />.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when a prefix length is out of range.</exception>
+        /// <exception cref="ArgumentException">Thrown when the subnets do not fit in this network.</exception>
+        public IReadOnlyList<IPNetwork> AllocateSubnets(IEnumerable<int> prefixLengths)
+        {
+            return network.AllocateSubnets(prefixLengths, []);
+        }
+
+        /// <summary>
+        ///     Places one subnet of each requested prefix length in the free space of this network: inside it, and outside every
+        ///     allocated network. For example, to add subnets to an address plan, pass the subnets that it already has as
+        ///     <paramref name="allocatedNetworks" />.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The subnets are returned in the order they were requested, and they never overlap each other or an allocated
+        ///         network. Allocated networks may overlap each other, lie partly or wholly outside this network, or be of the other
+        ///         IP version; only the addresses that they share with this network count as allocated.
+        ///     </para>
+        ///     <para>
+        ///         Each subnet, in the order requested, goes at the start of the smallest free block that holds it, and of the lowest
+        ///         such block when several are the same size. That fits the subnets whenever any arrangement of them fits, and keeps
+        ///         the larger free blocks whole. Taking the first of <c>AvailableSubnets</c> for each subnet in turn does neither: a
+        ///         small subnet can take the start of the only free block that a later, larger subnet needed.
+        ///     </para>
+        /// </remarks>
+        /// <param name="prefixLengths">
+        ///     The prefix length of each subnet, from this network's prefix length to 32 for IPv4 or 128 for IPv6.
+        /// </param>
+        /// <param name="allocatedNetworks">The networks that are already in use.</param>
+        /// <returns>The subnets, in the order of <paramref name="prefixLengths" />.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when either argument is <see langword="null" />.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when a prefix length is out of range.</exception>
+        /// <exception cref="ArgumentException">Thrown when the subnets do not fit in the free space of this network.</exception>
+        public IReadOnlyList<IPNetwork> AllocateSubnets(IEnumerable<int> prefixLengths, IEnumerable<IPNetwork> allocatedNetworks)
+        {
+            ArgumentNullException.ThrowIfNull(allocatedNetworks);
+            var networkBits = NetworkBits.FromIPNetwork(network);
+            var requestedPrefixLengths = ReadSubnetPrefixLengths(network, networkBits, prefixLengths);
+
+            if (TryPlaceSubnets(networkBits, requestedPrefixLengths, allocatedNetworks, out var subnets, out var unplacedIndex))
+                return subnets;
+
+            throw new ArgumentException($"The /{requestedPrefixLengths[unplacedIndex]} subnet at index {unplacedIndex} does not fit in the free space of {network}.", nameof(prefixLengths));
+        }
+
+        /// <summary>
         ///     Enumerates the subnets of a given prefix length that are free: inside this network and outside every allocated
         ///     network. For example, the first free /24 in an address plan is <c>plan.AvailableSubnets(24, allocated).First()</c>.
         /// </summary>
@@ -40,6 +109,10 @@ public static partial class IPNetworkExtensions
         ///         Nothing is worked out until the result is enumerated, and then only as far as it is enumerated. Taking the first
         ///         free subnet costs a sort of the allocated networks and a walk down to the first gap, however much free space
         ///         lies after it. Each enumeration reads <paramref name="allocatedNetworks" /> again, as LINQ methods do.
+        ///     </para>
+        ///     <para>
+        ///         To place several subnets, use <c>AllocateSubnets</c>. Taking the first free subnet for each one in turn can fail
+        ///         where it succeeds.
         ///     </para>
         /// </remarks>
         /// <param name="prefixLength">
@@ -319,6 +392,55 @@ public static partial class IPNetworkExtensions
                 throw new ArgumentOutOfRangeException(nameof(prefixLength), prefixLength, $"The prefix length of a subnet of {network} must be from {networkBits.PrefixLength} to {networkBits.AddressBitLength}.");
 
             return EnumerateSubnets(networkBits, prefixLength).Select(subnet => subnet.ToIPNetwork());
+        }
+
+        /// <summary>
+        ///     Places one subnet of each requested prefix length inside this network, or reports that they do not fit. See
+        ///     <c>AllocateSubnets</c>.
+        /// </summary>
+        /// <param name="prefixLengths">
+        ///     The prefix length of each subnet, from this network's prefix length to 32 for IPv4 or 128 for IPv6.
+        /// </param>
+        /// <param name="subnets">
+        ///     When this method returns <see langword="true" />, the subnets, in the order of <paramref name="prefixLengths" />;
+        ///     otherwise <see langword="null" />.
+        /// </param>
+        /// <returns><see langword="true" /> when the subnets fit; otherwise <see langword="false" />.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="prefixLengths" /> is <see langword="null" />.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when a prefix length is out of range.</exception>
+        public bool TryAllocateSubnets(IEnumerable<int> prefixLengths, [NotNullWhen(true)] out IReadOnlyList<IPNetwork>? subnets)
+        {
+            return network.TryAllocateSubnets(prefixLengths, [], out subnets);
+        }
+
+        /// <summary>
+        ///     Places one subnet of each requested prefix length in the free space of this network, or reports that they do not
+        ///     fit. See <c>AllocateSubnets</c>.
+        /// </summary>
+        /// <remarks>
+        ///     Subnets that do not fit are an expected outcome in address planning, so they return <see langword="false" />. Invalid
+        ///     arguments still throw.
+        /// </remarks>
+        /// <param name="prefixLengths">
+        ///     The prefix length of each subnet, from this network's prefix length to 32 for IPv4 or 128 for IPv6.
+        /// </param>
+        /// <param name="allocatedNetworks">The networks that are already in use.</param>
+        /// <param name="subnets">
+        ///     When this method returns <see langword="true" />, the subnets, in the order of <paramref name="prefixLengths" />;
+        ///     otherwise <see langword="null" />.
+        /// </param>
+        /// <returns><see langword="true" /> when the subnets fit; otherwise <see langword="false" />.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="prefixLengths" /> or <paramref name="allocatedNetworks" /> is <see langword="null" />.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when a prefix length is out of range.</exception>
+        public bool TryAllocateSubnets(IEnumerable<int> prefixLengths, IEnumerable<IPNetwork> allocatedNetworks, [NotNullWhen(true)] out IReadOnlyList<IPNetwork>? subnets)
+        {
+            ArgumentNullException.ThrowIfNull(allocatedNetworks);
+            var networkBits = NetworkBits.FromIPNetwork(network);
+            var requestedPrefixLengths = ReadSubnetPrefixLengths(network, networkBits, prefixLengths);
+
+            var isPlaced = TryPlaceSubnets(networkBits, requestedPrefixLengths, allocatedNetworks, out var placedSubnets, out _);
+            subnets = placedSubnets;
+            return isPlaced;
         }
     }
 
@@ -618,6 +740,89 @@ public static partial class IPNetworkExtensions
             return earlierNetwork.Version < laterNetwork.Version;
 
         return earlierNetwork.LastAddressBits < laterNetwork.BaseAddressBits;
+    }
+
+    /// <summary>
+    ///     Reads the prefix lengths of the subnets to place in a network, and checks that each is valid for a subnet of it.
+    /// </summary>
+    /// <param name="network">The network, for the exception message.</param>
+    /// <param name="networkBits">The network in integer form.</param>
+    /// <param name="prefixLengths">The prefix lengths.</param>
+    /// <returns>The prefix lengths, read once.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="prefixLengths" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when a prefix length is out of range.</exception>
+    private static int[] ReadSubnetPrefixLengths(IPNetwork network, NetworkBits networkBits, IEnumerable<int> prefixLengths)
+    {
+        ArgumentNullException.ThrowIfNull(prefixLengths);
+
+        var requestedPrefixLengths = prefixLengths.ToArray();
+        foreach (var prefixLength in requestedPrefixLengths)
+            if (prefixLength < networkBits.PrefixLength || prefixLength > networkBits.AddressBitLength)
+                throw new ArgumentOutOfRangeException(nameof(prefixLengths), prefixLength, $"The prefix length of a subnet of {network} must be from {networkBits.PrefixLength} to {networkBits.AddressBitLength}.");
+
+        return requestedPrefixLengths;
+    }
+
+    /// <summary>
+    ///     Places one subnet of each prefix length in the free space of a network, each in turn at the start of the smallest free
+    ///     block that holds it.
+    /// </summary>
+    /// <remarks>
+    ///     The free space is held as blocks that are aligned networks. Taking the smallest block that holds each subnet fits the
+    ///     subnets whenever any arrangement of them fits, in any order, because it splits a larger block only when no smaller one
+    ///     will do, and so never uses up room for a later subnet that another choice would have kept.
+    /// </remarks>
+    /// <param name="network">The network, in integer form.</param>
+    /// <param name="prefixLengths">The prefix lengths of the subnets, which the caller has validated.</param>
+    /// <param name="allocatedNetworks">The networks that are already in use.</param>
+    /// <param name="subnets">When this method returns <see langword="true" />, the subnets, in the order of the prefix lengths.</param>
+    /// <param name="unplacedIndex">When this method returns <see langword="false" />, the index of the first subnet that did not fit.</param>
+    /// <returns><see langword="true" /> when every subnet fits; otherwise <see langword="false" />.</returns>
+    private static bool TryPlaceSubnets(NetworkBits network, int[] prefixLengths, IEnumerable<IPNetwork> allocatedNetworks, [NotNullWhen(true)] out IPNetwork[]? subnets, out int unplacedIndex)
+    {
+        // the base addresses of the free blocks, by prefix length and in ascending order, so that the lowest of the smallest
+        // blocks that hold a subnet is found without a search
+        var freeBlocksByPrefixLength = new SortedSet<UInt128>?[network.AddressBitLength + 1];
+        foreach (var freeBlock in EnumerateDifference([network], SummarizeBits(allocatedNetworks.Select(NetworkBits.FromIPNetwork))))
+            AddFreeBlock(freeBlocksByPrefixLength, freeBlock);
+
+        var placedSubnets = new IPNetwork[prefixLengths.Length];
+        for (var subnetIndex = 0; subnetIndex < prefixLengths.Length; subnetIndex++)
+        {
+            var subnetPrefixLength = prefixLengths[subnetIndex];
+
+            // the smallest free block that holds the subnet has the longest prefix length that is not longer than the subnet's
+            var blockPrefixLength = subnetPrefixLength;
+            while (blockPrefixLength >= network.PrefixLength && freeBlocksByPrefixLength[blockPrefixLength] is not { Count: > 0 })
+                blockPrefixLength--;
+
+            if (blockPrefixLength < network.PrefixLength)
+            {
+                subnets = null;
+                unplacedIndex = subnetIndex;
+                return false;
+            }
+
+            var blockAddresses = freeBlocksByPrefixLength[blockPrefixLength]!;
+            var blockAddressBits = blockAddresses.Min;
+            blockAddresses.Remove(blockAddressBits);
+
+            // the subnet takes the start of the block, and the rest of the block is the upper half of each network between the
+            // two; a /24 placed in a /22 leaves the upper /23 and the upper /24 of the lower /23 free
+            for (var halfPrefixLength = blockPrefixLength + 1; halfPrefixLength <= subnetPrefixLength; halfPrefixLength++)
+                AddFreeBlock(freeBlocksByPrefixLength, new NetworkBits(network.Version, blockAddressBits, halfPrefixLength).ComplementaryNetwork);
+
+            placedSubnets[subnetIndex] = new NetworkBits(network.Version, blockAddressBits, subnetPrefixLength).ToIPNetwork();
+        }
+
+        subnets = placedSubnets;
+        unplacedIndex = -1;
+        return true;
+
+        static void AddFreeBlock(SortedSet<UInt128>?[] freeBlocksByPrefixLength, NetworkBits freeBlock)
+        {
+            (freeBlocksByPrefixLength[freeBlock.PrefixLength] ??= new SortedSet<UInt128>()).Add(freeBlock.BaseAddressBits);
+        }
     }
 
     /// <summary>

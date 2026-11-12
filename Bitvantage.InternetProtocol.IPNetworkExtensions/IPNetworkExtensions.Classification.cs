@@ -53,7 +53,8 @@ public static partial class IPNetworkExtensions
         ///         The one exception is the IPv4-mapped block, <c>::ffff:0:0/96</c>, which is in the networks of no allocation. Its
         ///         addresses take the allocation of the IPv4 address that they map, and they only exist inside a host, where a
         ///         dual-stack socket reports an IPv4 client with one. To test such an address against the result, unmap it first,
-        ///         or, from .NET 9 on, use the built-in <see cref="IPNetwork.Contains" />, which maps it.
+        ///         as in <c>network.ContainsStrict(address.Unmap())</c>. The built-in <see cref="IPNetwork.Contains" /> maps it from
+        ///         .NET 9 on, but on .NET 9 and .NET 10 also tests it wrongly against the IPv6 networks of the result.
         ///     </para>
         ///     <para>
         ///         Use the result to build allow-lists and deny-lists, such as the private networks for ASP.NET Core's
@@ -231,8 +232,8 @@ public static partial class IPNetworkExtensions
     }
 
     /// <summary>
-    ///     Converts an IPv4-mapped IPv6 network, inside <c>::ffff:0:0/96</c>, to the IPv4 network that it maps, so that it is
-    ///     classified as that IPv4 network. Any other network is returned unchanged.
+    ///     Converts an IPv4-mapped IPv6 network, inside <c>::ffff:0:0/96</c>, to the IPv4 network that it maps, for <c>Unmap</c>
+    ///     and so that it is classified as that IPv4 network. Any other network is returned unchanged.
     /// </summary>
     /// <param name="network">The network.</param>
     /// <returns>The IPv4 network, or <paramref name="network" />.</returns>

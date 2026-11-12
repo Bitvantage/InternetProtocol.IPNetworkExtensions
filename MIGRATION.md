@@ -18,6 +18,7 @@ versions of NetworkPrefix.
 - On .NET 8 or .NET 9, build with the .NET 10 SDK and set `<LangVersion>14</LangVersion>`.
 - Apply the mappings in the table below, and import the `Bitvantage.InternetProtocol` namespace wherever the members
   are used.
+- Replace calls to `Contains(IPAddress)` with `ContainsStrict`. A call left unchanged still compiles, against the built-in `IPNetwork.Contains`, which from .NET 9 on matches an IPv4-mapped IPv6 address such as `::ffff:10.1.2.3` against IPv4 networks, where `NetworkPrefix` kept IPv4 and IPv6 apart, and on .NET 9 and .NET 10 also tests one wrongly against IPv6 networks.
 - Parse untrusted text with `IPNetwork.ParseStrict` rather than `IPNetwork.Parse`, and write IPv4 addresses in the
   standard dotted-decimal form; text such as `10.0.0/24` or `010.0.0.0/8` is rejected.
 - Replace parsing of host names with `IPNetwork.Resolve` or `IPNetwork.ResolveAsync`.
@@ -58,7 +59,7 @@ versions of NetworkPrefix.
   | `ContainsOrEqual`                            | `IsSupernetOf`                                       |
   | `ContainedBy`                                | `IsProperSubnetOf`                                   |
   | `ContainedByOrEqual`                         | `IsSubnetOf`                                         |
-  | `Contains(IPAddress)`                        | the built-in `IPNetwork.Contains(IPAddress)`         |
+  | `Contains(IPAddress)`                        | `ContainsStrict`                                     |
   | `RemoveNetwork(network)`                     | `Exclude(network)`                                   |
   | `GetContainingNetwork(other)`                | `IPNetwork.GetContainingNetwork(network, other)`     |
   | `NetworkPrefix.GetContainingNetwork(...)`    | `IPNetwork.GetContainingNetwork(...)`                |
@@ -158,6 +159,10 @@ versions of NetworkPrefix.
 - `IPNetwork.GetNetworks(allocation)`, the networks that cover exactly the addresses of an allocation, such as the
   private networks for an allow-list.
 - `IPNetwork.GetPrefixLengthForHosts`, the longest prefix length whose networks hold a number of hosts.
+- `IPNetwork.GetPrefixLengthForAddresses`, which counts every address rather than hosts, and `IPNetwork.GetPrefixLengthForSubnets`, which sizes a network for a number of subnets of one length, or for one subnet of each of several lengths.
+- `AllocateSubnets` and `TryAllocateSubnets`, which lay out a variable-length subnet masking (VLSM) plan: one subnet of each requested length, each in the smallest free block that holds it, returned in the order requested.
+- `ContainsStrict`, which tests an address as `Contains(IPAddress)` did in 2.0.0, keeping IPv4 and IPv6 apart on every version of .NET.
+- `Unmap()` on a network, which converts an IPv4-mapped IPv6 network such as `::ffff:10.0.0.0/104` to the IPv4 network `10.0.0.0/8`.
 - `GetReverseZones()`, every reverse DNS zone of a network, including one whose prefix length is not on a label
   boundary, such as the four zones of a /22.
 - `ToExpandedString()` on an address, which writes an IPv6 address in full, such as

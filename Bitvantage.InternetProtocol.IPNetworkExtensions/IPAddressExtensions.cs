@@ -173,7 +173,7 @@ public static partial class IPAddressExtensions
         /// </summary>
         /// <remarks>
         ///     A dual-stack server reports IPv4 clients as IPv4-mapped IPv6 addresses, which IPv4 networks do not contain under
-        ///     the subnet tests of this library. Unmapping first lets them match. Unlike <see cref="IPAddress.MapToIPv4" />, which
+        ///     <c>ContainsStrict</c> and the subnet tests of this library. Unmapping first lets them match. Unlike <see cref="IPAddress.MapToIPv4" />, which
         ///     turns any IPv6 address into an IPv4 address, such as <c>2001:db8::1</c> into <c>0.0.0.1</c>, this leaves an address
         ///     that is not IPv4-mapped alone.
         /// </remarks>

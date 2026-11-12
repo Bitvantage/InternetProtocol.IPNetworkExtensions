@@ -8,6 +8,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Bitvantage.InternetProtocol;
@@ -112,6 +114,63 @@ public static partial class IPNetworkExtensions
         }
 
         /// <summary>
+        ///     Gets the longest prefix length whose networks hold at least a number of addresses. For example, 256 addresses need
+        ///     an IPv4 /24 or an IPv6 /120.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Every address is counted, as <c>TotalAddresses</c> counts them, including the network and broadcast addresses
+        ///         that <c>GetPrefixLengthForHosts</c> leaves out; 256 hosts need an IPv4 /23 or an IPv6 /119. Zero or one address
+        ///         gives a host network.
+        ///     </para>
+        ///     <para>
+        ///         The 2^128 addresses of <c>::/0</c> are one more than a <see cref="UInt128" /> holds, but every count above 2^127
+        ///         already needs a /0.
+        ///     </para>
+        /// </remarks>
+        /// <param name="version">The IP version.</param>
+        /// <param name="addressCount">The number of addresses the network must hold.</param>
+        /// <returns>The prefix length.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        ///     Thrown when <paramref name="version" /> is neither IPv4 nor IPv6, or no network of that version holds that many
+        ///     addresses.
+        /// </exception>
+        public static int GetPrefixLengthForAddresses(IPVersion version, UInt128 addressCount)
+        {
+            ValidateVersionAndPrefixLength(version, 0);
+
+            // a network with n host bits holds 2^n addresses, so it needs the host bits that number every address
+            var addressBitLength = AddressMath.GetBitLength(version);
+            var hostBitLength = GetIndexBitLength(addressCount);
+            if (hostBitLength > addressBitLength)
+                throw new ArgumentOutOfRangeException(nameof(addressCount), addressCount, $"No {version} network holds {addressCount} addresses. The most that one holds is {BigInteger.One << addressBitLength}.");
+
+            return addressBitLength - hostBitLength;
+        }
+
+        /// <summary>
+        ///     Gets the longest prefix length whose networks hold at least a number of addresses. See
+        ///     <see cref="GetPrefixLengthForAddresses(IPVersion, UInt128)" />.
+        /// </summary>
+        /// <remarks>
+        ///     This overload accepts an <see cref="int" /> variable. Cast other integer types to <see cref="int" /> or
+        ///     <see cref="UInt128" />.
+        /// </remarks>
+        /// <param name="version">The IP version.</param>
+        /// <param name="addressCount">The number of addresses the network must hold.</param>
+        /// <returns>The prefix length.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        ///     Thrown when <paramref name="version" /> is neither IPv4 nor IPv6, <paramref name="addressCount" /> is negative, or
+        ///     no network of that version holds that many addresses.
+        /// </exception>
+        public static int GetPrefixLengthForAddresses(IPVersion version, int addressCount)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(addressCount);
+
+            return IPNetwork.GetPrefixLengthForAddresses(version, (UInt128)addressCount);
+        }
+
+        /// <summary>
         ///     Gets the longest prefix length whose networks hold at least a number of hosts. For example, a subnet for 50 IPv4
         ///     hosts needs a /26, which holds 62.
         /// </summary>
@@ -119,7 +178,7 @@ public static partial class IPNetworkExtensions
         ///     <para>
         ///         Hosts are counted as <c>TotalHosts</c> counts them, so two IPv4 hosts fit in a /31, a point-to-point network,
         ///         and one fits in a /32. Planners that leave out /31 networks expect a /30 for two hosts. Zero hosts gives a host
-        ///         network.
+        ///         network. To count every address instead, use <c>GetPrefixLengthForAddresses</c>.
         ///     </para>
         ///     <para>
         ///         Pair it with <c>AvailableSubnets</c> to place a subnet of the right size, as in
@@ -164,6 +223,119 @@ public static partial class IPNetworkExtensions
             ArgumentOutOfRangeException.ThrowIfNegative(hostCount);
 
             return IPNetwork.GetPrefixLengthForHosts(version, (UInt128)hostCount);
+        }
+
+        /// <summary>
+        ///     Gets the longest prefix length whose networks hold at least a number of subnets of one prefix length. For example,
+        ///     300 /64 subnets need a /55, which holds 512.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         A network holds 2^n subnets that are n bits longer, so the result is <paramref name="subnetPrefixLength" /> less
+        ///         the base-2 logarithm of <paramref name="subnetCount" />, rounded up. Zero or one subnet gives
+        ///         <paramref name="subnetPrefixLength" /> itself.
+        ///     </para>
+        ///     <para>
+        ///         Both numbers are integers, so a call with the two swapped compiles: 16 /24 subnets need a /20, but 24 /16 subnets
+        ///         need a /11. Name the arguments where the order is not clear, as in
+        ///         <c>IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, subnetPrefixLength: 24, subnetCount: 16)</c>.
+        ///     </para>
+        /// </remarks>
+        /// <param name="version">The IP version.</param>
+        /// <param name="subnetPrefixLength">The prefix length of the subnets, from 0 to 32 for IPv4 or 128 for IPv6.</param>
+        /// <param name="subnetCount">The number of subnets the network must hold.</param>
+        /// <returns>The prefix length.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        ///     Thrown when <paramref name="version" /> is neither IPv4 nor IPv6, <paramref name="subnetPrefixLength" /> is out of
+        ///     range, or no network of that version holds that many subnets.
+        /// </exception>
+        public static int GetPrefixLengthForSubnets(IPVersion version, int subnetPrefixLength, UInt128 subnetCount)
+        {
+            ValidateVersionAndPrefixLength(version, subnetPrefixLength);
+
+            // the subnets of a network are numbered by the bits between its prefix length and theirs
+            var subnetIndexBitLength = GetIndexBitLength(subnetCount);
+            if (subnetIndexBitLength > subnetPrefixLength)
+                throw new ArgumentOutOfRangeException(nameof(subnetCount), subnetCount, $"No {version} network holds {subnetCount} /{subnetPrefixLength} subnets. The most that one holds is {BigInteger.One << subnetPrefixLength}.");
+
+            return subnetPrefixLength - subnetIndexBitLength;
+        }
+
+        /// <summary>
+        ///     Gets the longest prefix length whose networks hold at least a number of subnets of one prefix length. See
+        ///     <see cref="GetPrefixLengthForSubnets(IPVersion, int, UInt128)" />.
+        /// </summary>
+        /// <remarks>
+        ///     This overload accepts an <see cref="int" /> variable. Cast other integer types to <see cref="int" /> or
+        ///     <see cref="UInt128" />.
+        /// </remarks>
+        /// <param name="version">The IP version.</param>
+        /// <param name="subnetPrefixLength">The prefix length of the subnets, from 0 to 32 for IPv4 or 128 for IPv6.</param>
+        /// <param name="subnetCount">The number of subnets the network must hold.</param>
+        /// <returns>The prefix length.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        ///     Thrown when <paramref name="version" /> is neither IPv4 nor IPv6, <paramref name="subnetPrefixLength" /> is out of
+        ///     range, <paramref name="subnetCount" /> is negative, or no network of that version holds that many subnets.
+        /// </exception>
+        public static int GetPrefixLengthForSubnets(IPVersion version, int subnetPrefixLength, int subnetCount)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(subnetCount);
+
+            return IPNetwork.GetPrefixLengthForSubnets(version, subnetPrefixLength, (UInt128)subnetCount);
+        }
+
+        /// <summary>
+        ///     Gets the longest prefix length whose networks hold one subnet of each of several prefix lengths, as a
+        ///     variable-length subnet masking (VLSM) plan needs. For example, a /23, a /24 and a /26 need a /22.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The subnets need a network with at least as many addresses as they have between them: a /23, a /24 and a /26
+        ///         have 832, and a /22 has 1,024. A network that large always holds them, because subnets placed from the largest
+        ///         down leave no gaps.
+        ///     </para>
+        ///     <para>
+        ///         Use it to size the block to request for an address plan, and <c>AllocateSubnets</c> to lay the subnets out in
+        ///         the block; they always fit in an empty network of this size.
+        ///     </para>
+        /// </remarks>
+        /// <param name="version">The IP version.</param>
+        /// <param name="subnetPrefixLengths">
+        ///     The prefix length of each subnet, from 0 to 32 for IPv4 or 128 for IPv6.
+        /// </param>
+        /// <returns>The prefix length.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="subnetPrefixLengths" /> is <see langword="null" />.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        ///     Thrown when <paramref name="version" /> is neither IPv4 nor IPv6, or a prefix length is out of range.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        ///     Thrown when <paramref name="subnetPrefixLengths" /> is empty, or no network of that version holds every subnet.
+        /// </exception>
+        public static int GetPrefixLengthForSubnets(IPVersion version, IEnumerable<int> subnetPrefixLengths)
+        {
+            ValidateVersionAndPrefixLength(version, 0);
+            ArgumentNullException.ThrowIfNull(subnetPrefixLengths);
+
+            // the addresses are added up as a BigInteger, since the 2^128 addresses of an IPv6 /0 do not fit in a UInt128
+            var addressBitLength = AddressMath.GetBitLength(version);
+            var totalAddresses = BigInteger.Zero;
+            var subnetCount = 0;
+            foreach (var subnetPrefixLength in subnetPrefixLengths)
+            {
+                ValidateVersionAndPrefixLength(version, subnetPrefixLength, nameof(subnetPrefixLengths));
+                totalAddresses += BigInteger.One << (addressBitLength - subnetPrefixLength);
+                subnetCount++;
+            }
+
+            if (subnetCount == 0)
+                throw new ArgumentException("At least one subnet prefix length is required.", nameof(subnetPrefixLengths));
+
+            // the network needs the host bits that number every address of the subnets
+            var hostBitLength = (int)(totalAddresses - BigInteger.One).GetBitLength();
+            if (hostBitLength > addressBitLength)
+                throw new ArgumentException($"No {version} network holds the subnets, which have {totalAddresses} addresses between them. The most that one holds is {BigInteger.One << addressBitLength}.", nameof(subnetPrefixLengths));
+
+            return addressBitLength - hostBitLength;
         }
 
         /// <summary>
@@ -564,6 +736,18 @@ public static partial class IPNetworkExtensions
     }
 
     /// <summary>
+    ///     Gets the number of bits that give each of a number of items its own value: the base-2 logarithm of the number, rounded
+    ///     up. For example, 256 items need 8 bits and 257 need 9. Zero or one item needs none.
+    /// </summary>
+    /// <param name="itemCount">The number of items.</param>
+    /// <returns>The number of bits, from 0 to 128.</returns>
+    private static int GetIndexBitLength(UInt128 itemCount)
+    {
+        // the items are numbered from 0 to the count less one, and the bit length of that last number is the answer
+        return itemCount <= UInt128.One ? 0 : AddressMath.IPv6BitLength - (int)UInt128.LeadingZeroCount(itemCount - UInt128.One);
+    }
+
+    /// <summary>
     ///     Gets the IP version of an address that a network is created from, and validates the address.
     /// </summary>
     /// <param name="address">The address.</param>
@@ -592,18 +776,22 @@ public static partial class IPNetworkExtensions
     }
 
     /// <summary>
-    ///     Validates the IP version and prefix length that a mask is requested for.
+    ///     Validates an IP version and a prefix length of that version, such as the ones that a mask is requested for.
     /// </summary>
     /// <param name="version">The IP version.</param>
     /// <param name="prefixLength">The prefix length.</param>
+    /// <param name="parameterName">
+    ///     The name of the caller's parameter to blame when the prefix length is out of range, which is the caller's argument
+    ///     unless it is given.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when either argument is out of range.</exception>
-    private static void ValidateVersionAndPrefixLength(IPVersion version, int prefixLength)
+    private static void ValidateVersionAndPrefixLength(IPVersion version, int prefixLength, [CallerArgumentExpression(nameof(prefixLength))] string? parameterName = null)
     {
         if (version is not (IPVersion.IPv4 or IPVersion.IPv6))
             throw new ArgumentOutOfRangeException(nameof(version), version, "Only IPv4 and IPv6 are supported.");
 
-        ArgumentOutOfRangeException.ThrowIfNegative(prefixLength);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(prefixLength, AddressMath.GetBitLength(version));
+        ArgumentOutOfRangeException.ThrowIfNegative(prefixLength, parameterName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(prefixLength, AddressMath.GetBitLength(version), parameterName);
     }
 
     /// <summary>

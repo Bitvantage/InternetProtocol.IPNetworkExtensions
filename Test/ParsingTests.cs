@@ -340,6 +340,40 @@ public class ParsingTests
     }
 
     [Test]
+    public void GetPrefixLengthForAddresses_01()
+    {
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 256), Is.EqualTo(24));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 257), Is.EqualTo(23));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 2), Is.EqualTo(31));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 1), Is.EqualTo(32));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 0), Is.EqualTo(32));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, (UInt128)uint.MaxValue + 1), Is.EqualTo(0));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv6, 256), Is.EqualTo(120));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv6, UInt128.One << 64), Is.EqualTo(64));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv6, (UInt128.One << 127) + 1), Is.EqualTo(0));
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv6, UInt128.MaxValue), Is.EqualTo(0));
+
+        // hosts leave out the reserved addresses, which differ between the IP versions, where addresses count every one
+        Assert.That(IPNetwork.GetPrefixLengthForHosts(IPVersion.IPv4, 256), Is.EqualTo(23));
+        Assert.That(IPNetwork.GetPrefixLengthForHosts(IPVersion.IPv6, 256), Is.EqualTo(119));
+
+        // a network's own address count gives back its prefix length; only ::/0, with 2^128 addresses, doesn't fit a UInt128
+        for (var prefixLength = 0; prefixLength <= 32; prefixLength++)
+            Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, (UInt128)new IPNetwork(IPAddress.Any, prefixLength).TotalAddresses), Is.EqualTo(prefixLength));
+
+        for (var prefixLength = 1; prefixLength <= 128; prefixLength++)
+            Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv6, (UInt128)new IPNetwork(IPAddress.IPv6Any, prefixLength).TotalAddresses), Is.EqualTo(prefixLength));
+
+        // an int variable compiles, as well as a constant
+        var addressCount = 256;
+        Assert.That(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, addressCount), Is.EqualTo(24));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, (UInt128)uint.MaxValue + 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForAddresses(IPVersion.Undefined, 1));
+    }
+
+    [Test]
     public void GetPrefixLengthForHosts_01()
     {
         Assert.That(IPNetwork.GetPrefixLengthForHosts(IPVersion.IPv4, 50), Is.EqualTo(26));
@@ -358,5 +392,72 @@ public class ParsingTests
         Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForHosts(IPVersion.IPv4, (UInt128)uint.MaxValue));
         Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForHosts(IPVersion.IPv4, -1));
         Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForHosts(IPVersion.Undefined, 1));
+    }
+
+    [Test]
+    public void GetPrefixLengthForSubnets_01()
+    {
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, 64, 300), Is.EqualTo(55));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, 48, 200), Is.EqualTo(40));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 24, 16), Is.EqualTo(20));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 24, 17), Is.EqualTo(19));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 24, 1), Is.EqualTo(24));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 24, 0), Is.EqualTo(24));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 8, 256), Is.EqualTo(0));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, 128, UInt128.MaxValue), Is.EqualTo(0));
+
+        // the two numbers swapped are just as valid, and give a different answer, which is what the parameter names are for
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, subnetPrefixLength: 16, subnetCount: 24), Is.EqualTo(11));
+
+        // an int variable compiles, as well as a constant
+        var subnetCount = 300;
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, 64, subnetCount), Is.EqualTo(55));
+
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 8, 257))?.ParamName, Is.EqualTo("subnetCount"));
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 33, 1))?.ParamName, Is.EqualTo("subnetPrefixLength"));
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, -1, 1))?.ParamName, Is.EqualTo("subnetPrefixLength"));
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, 24, -1))?.ParamName, Is.EqualTo("subnetCount"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.Undefined, 24, 1));
+    }
+
+    [Test]
+    public void GetPrefixLengthForSubnets_02()
+    {
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [23, 24, 26]), Is.EqualTo(22));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [24, 24, 24]), Is.EqualTo(22));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [24, 24, 24, 24]), Is.EqualTo(22));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [25]), Is.EqualTo(25));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [1, 1]), Is.EqualTo(0));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, [64, 64, 64, 56]), Is.EqualTo(55));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, [0]), Is.EqualTo(0));
+
+        // subnets of one length give the same answer as their count does
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, Enumerable.Repeat(64, 300)), Is.EqualTo(55));
+
+        // more addresses than the IP version has, an empty list, and a prefix length that is out of range are rejected
+        Assert.Throws<ArgumentException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, [0, 128]));
+        Assert.Throws<ArgumentException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [0, 0]));
+        Assert.That(Assert.Throws<ArgumentException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, []))?.ParamName, Is.EqualTo("subnetPrefixLengths"));
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [24, 33]))?.ParamName, Is.EqualTo("subnetPrefixLengths"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.Undefined, [24]));
+        Assert.Throws<ArgumentNullException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, null!));
+    }
+
+    [Test]
+    public void GetPrefixLengthForSubnets_03()
+    {
+        // the subnets always fit in an empty network of the size given, and never in one half as large
+        var random = new Random(20261113);
+
+        for (var trial = 0; trial < 1000; trial++)
+        {
+            var prefixLengths = Enumerable.Range(0, random.Next(1, 20)).Select(_ => random.Next(8, 33)).ToArray();
+            var prefixLength = IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, prefixLengths);
+            var description = $"/{string.Join(", /", prefixLengths)} in a /{prefixLength}";
+
+            Assert.That(new IPNetwork(IPAddress.Any, prefixLength).TryAllocateSubnets(prefixLengths, out _), Is.True, description);
+            if (prefixLength < prefixLengths.Min())
+                Assert.That(new IPNetwork(IPAddress.Any, prefixLength + 1).TryAllocateSubnets(prefixLengths, out _), Is.False, description);
+        }
     }
 }

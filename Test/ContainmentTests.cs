@@ -87,6 +87,67 @@ public class ContainmentTests
     }
 
     [Test]
+    public void ContainsStrict_01()
+    {
+        // an address is in a network exactly when its host network is a subnet of it, at every prefix length of both IP versions
+        var addresses = new[] { "10.1.2.3", "0.0.0.0", "255.255.255.255", "::ffff:10.1.2.3", "::10.1.2.3", "2001:db8::a01:203", "::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" }.Select(Address).ToArray();
+
+        foreach (var networkAddress in addresses)
+        {
+            var hostNetwork = IPNetwork.FromAddress(networkAddress);
+            for (var prefixLength = 0; prefixLength <= hostNetwork.PrefixLength; prefixLength++)
+            {
+                var network = hostNetwork.GetSupernet(prefixLength);
+                foreach (var address in addresses)
+                    Assert.That(network.ContainsStrict(address), Is.EqualTo(network.IsSupernetOf(IPNetwork.FromAddress(address))), $"{network} and {address}");
+            }
+        }
+    }
+
+    [Test]
+    public void ContainsStrict_IPv4_01()
+    {
+        var network = Network("10.20.30.0/24");
+
+        Assert.That(network.ContainsStrict(Address("10.20.30.0")), Is.True);
+        Assert.That(network.ContainsStrict(Address("10.20.30.255")), Is.True);
+        Assert.That(network.ContainsStrict(Address("10.20.31.40")), Is.False);
+
+        // a host network contains the address it represents
+        Assert.That(Network("10.20.30.40/32").ContainsStrict(Address("10.20.30.40")), Is.True);
+        Assert.That(Network("10.20.30.40/32").ContainsStrict(Address("10.20.30.41")), Is.False);
+
+        // an address of the other IP version is never in the network, including an IPv4-mapped or IPv4-compatible one
+        Assert.That(Network("10.0.0.0/8").ContainsStrict(Address("::ffff:10.1.2.3")), Is.False);
+        Assert.That(Network("0.0.0.0/0").ContainsStrict(Address("::ffff:8.8.8.8")), Is.False);
+        Assert.That(Network("0.0.0.0/0").ContainsStrict(IPAddress.IPv6Any), Is.False);
+        Assert.That(Network("10.0.0.0/8").ContainsStrict(Address("::10.1.2.3")), Is.False);
+        Assert.That(Network("10.0.0.0/8").ContainsStrict(Address("::ffff:10.1.2.3").Unmap()), Is.True);
+
+        Assert.Throws<ArgumentNullException>(() => network.ContainsStrict(null!));
+    }
+
+    [Test]
+    public void ContainsStrict_IPv6_01()
+    {
+        // the built-in Contains gets the first three wrong on .NET 9 and .NET 10, testing the mapped address as though the
+        // networks were IPv4
+        var mappedAddress = Address("::ffff:10.1.2.3");
+
+        Assert.That(Network("::ffff:0:0/96").ContainsStrict(mappedAddress), Is.True);
+        Assert.That(Network("::/8").ContainsStrict(mappedAddress), Is.True);
+        Assert.That(Network("2001:db8::a01:200/120").ContainsStrict(mappedAddress), Is.False);
+
+        Assert.That(Network("::ffff:0:0/96").ContainsStrict(Address("10.1.2.3")), Is.False);
+        Assert.That(Network("::/0").ContainsStrict(Address("10.1.2.3")), Is.False);
+        Assert.That(Network("2001:db8::/32").ContainsStrict(Address("2001:db8::1")), Is.True);
+        Assert.That(Network("2001:db8::/32").ContainsStrict(Address("2001:db9::1")), Is.False);
+
+        // a scope ID is not part of the address
+        Assert.That(Network("fe80::/10").ContainsStrict(Address("fe80::1%3")), Is.True);
+    }
+
+    [Test]
     public void IsProperSupernetOf_IPv4_03()
     {
         // a network of the other IP version is never a subnet, and an address of the other version is never a member
