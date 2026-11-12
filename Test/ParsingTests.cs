@@ -434,10 +434,15 @@ public class ParsingTests
         // subnets of one length give the same answer as their count does
         Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, Enumerable.Repeat(64, 300)), Is.EqualTo(55));
 
-        // more addresses than the IP version has, an empty list, and a prefix length that is out of range are rejected
+        // an empty list gives a host network, as zero addresses do, and the host network holds the empty plan
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, []), Is.EqualTo(32));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, []), Is.EqualTo(128));
+        Assert.That(IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, []), Is.EqualTo(IPNetwork.GetPrefixLengthForAddresses(IPVersion.IPv4, 0)));
+        Assert.That(Network("10.0.0.7/32").AllocateSubnets([]), Is.Empty);
+
+        // more addresses than the IP version has, and a prefix length that is out of range, are rejected
         Assert.Throws<ArgumentException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv6, [0, 128]));
         Assert.Throws<ArgumentException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [0, 0]));
-        Assert.That(Assert.Throws<ArgumentException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, []))?.ParamName, Is.EqualTo("subnetPrefixLengths"));
         Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, [24, 33]))?.ParamName, Is.EqualTo("subnetPrefixLengths"));
         Assert.Throws<ArgumentOutOfRangeException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.Undefined, [24]));
         Assert.Throws<ArgumentNullException>(() => IPNetwork.GetPrefixLengthForSubnets(IPVersion.IPv4, null!));

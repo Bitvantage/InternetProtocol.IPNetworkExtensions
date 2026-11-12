@@ -292,7 +292,7 @@ public static partial class IPNetworkExtensions
         ///     <para>
         ///         The subnets need a network with at least as many addresses as they have between them: a /23, a /24 and a /26
         ///         have 832, and a /22 has 1,024. A network that large always holds them, because subnets placed from the largest
-        ///         down leave no gaps.
+        ///         down leave no gaps. An empty list gives a host network, as zero addresses do.
         ///     </para>
         ///     <para>
         ///         Use it to size the block to request for an address plan, and <c>AllocateSubnets</c> to lay the subnets out in
@@ -309,7 +309,7 @@ public static partial class IPNetworkExtensions
         ///     Thrown when <paramref name="version" /> is neither IPv4 nor IPv6, or a prefix length is out of range.
         /// </exception>
         /// <exception cref="ArgumentException">
-        ///     Thrown when <paramref name="subnetPrefixLengths" /> is empty, or no network of that version holds every subnet.
+        ///     Thrown when no network of that version holds every subnet.
         /// </exception>
         public static int GetPrefixLengthForSubnets(IPVersion version, IEnumerable<int> subnetPrefixLengths)
         {
@@ -319,19 +319,14 @@ public static partial class IPNetworkExtensions
             // the addresses are added up as a BigInteger, since the 2^128 addresses of an IPv6 /0 do not fit in a UInt128
             var addressBitLength = AddressMath.GetBitLength(version);
             var totalAddresses = BigInteger.Zero;
-            var subnetCount = 0;
             foreach (var subnetPrefixLength in subnetPrefixLengths)
             {
                 ValidateVersionAndPrefixLength(version, subnetPrefixLength, nameof(subnetPrefixLengths));
                 totalAddresses += BigInteger.One << (addressBitLength - subnetPrefixLength);
-                subnetCount++;
             }
 
-            if (subnetCount == 0)
-                throw new ArgumentException("At least one subnet prefix length is required.", nameof(subnetPrefixLengths));
-
-            // the network needs the host bits that number every address of the subnets
-            var hostBitLength = (int)(totalAddresses - BigInteger.One).GetBitLength();
+            // the network needs the host bits that number every address of the subnets, and none when there are no subnets
+            var hostBitLength = totalAddresses <= BigInteger.One ? 0 : (int)(totalAddresses - BigInteger.One).GetBitLength();
             if (hostBitLength > addressBitLength)
                 throw new ArgumentException($"No {version} network holds the subnets, which have {totalAddresses} addresses between them. The most that one holds is {BigInteger.One << addressBitLength}.", nameof(subnetPrefixLengths));
 
