@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-11-12
+
+### Changed
+
+- `IPNetwork.GetPrefixLengthForSubnets` gives a host network, /32 or /128, for an empty list of prefix lengths instead of throwing, as `GetPrefixLengthForAddresses` does for zero addresses. The host network holds the empty plan, which `AllocateSubnets` accepts.
+
 ## [1.1.0] - 2026-11-12
 
 ### Added
@@ -25,5 +31,6 @@ First release. The library adds CIDR, subnet and supernet math to .NET's built-i
 `IPAddress` as C# 14 extension members, for .NET 8 and .NET 10. It succeeds `Bitvantage.InternetProtocol.NetworkPrefix`
 2.0.0; see [MIGRATION.md](MIGRATION.md) for moving from its `NetworkPrefix` class.
 
+[1.1.1]: https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Bitvantage/InternetProtocol.IPNetworkExtensions/releases/tag/v1.0.0
